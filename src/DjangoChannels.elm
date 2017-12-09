@@ -1,11 +1,13 @@
 module DjangoChannels
     exposing
-        ( StreamHandler
-        , handleStream
-        , streamDemultiplexer
+        ( streamDemultiplexer
+        , BindingStreamHandler
+        , handleBindingStream
         , defaultCreate
         , defaultUpdate
         , defaultDelete
+        , InitialStreamHandler
+        , handleInitialStream
         )
 
 {-|
@@ -15,10 +17,10 @@ Decoders and such to ease communication with django channels.
 elm-django-channels is an oppinionated way to use communicate with Django Channels from Elm.
 
 # Definition
-@docs StreamHandler
+@docs BindingStreamHandler
 
 # Utilities
-@docs streamDemultiplexer, handleStream
+@docs streamDemultiplexer, handleBindingStream
 
 # Default operations
 @docs defaultCreate, defaultUpdate, defaultDelete
@@ -27,7 +29,7 @@ elm-django-channels is an oppinionated way to use communicate with Django Channe
 
 -- Core modules
 
-import Json.Decode exposing (Decoder, string, field)
+import Json.Decode exposing (Decoder, string, field, list)
 
 
 -- External modules
@@ -54,21 +56,26 @@ modelBindingDecoder dataDecoder pkDecoder =
 
 {-| Deal with streams from a WebsocketDemultiplexer.
 -}
-streamDemultiplexer : String -> String
-streamDemultiplexer data =
+streamDemultiplexer : String -> (String -> streamType) -> streamType -> streamType
+streamDemultiplexer data stringToStream notFoundStream =
     case Json.Decode.decodeString (field "stream" string) data of
         Ok stream ->
-            stream
+            stringToStream stream
 
         Err _ ->
-            "nothing"
+            notFoundStream
 
 
-{-| StreamHandler defines how we should deal with a specific stream.
+type alias InitialStreamHandler pkType instanceType =
+    { instanceDecoder : Decoder instanceType
+    , pkDecoder : Decoder pkType
+    }
+
+
+{-| BindingStreamHandler defines how we should deal with a specific WebsocketBinding stream.
 -}
-type alias StreamHandler instanceType pkType =
-    { streamName : String
-    , instanceDecoder : Decoder instanceType
+type alias BindingStreamHandler pkType instanceType =
+    { instanceDecoder : Decoder instanceType
     , pkDecoder : Decoder pkType
     , createFunc : instanceType -> pkType -> List ( pkType, instanceType ) -> List ( pkType, instanceType )
     , updateFunc : instanceType -> pkType -> List ( pkType, instanceType ) -> List ( pkType, instanceType )
@@ -76,10 +83,10 @@ type alias StreamHandler instanceType pkType =
     }
 
 
-{-| Handle data on a given StreamHandler.
+{-| Handle data on a given BindingStreamHandler.
 -}
-handleStream : StreamHandler instanceType pkType -> String -> List ( pkType, instanceType ) -> List ( pkType, instanceType )
-handleStream streamHandler data instances =
+handleBindingStream : BindingStreamHandler pkType instanceType -> String -> List ( pkType, instanceType ) -> List ( pkType, instanceType )
+handleBindingStream streamHandler data instances =
     let
         decoder =
             modelBindingDecoder streamHandler.instanceDecoder streamHandler.pkDecoder
@@ -101,6 +108,40 @@ handleStream streamHandler data instances =
 
             Err _ ->
                 instances
+
+
+handleInitialStream : InitialStreamHandler pkType instanceType -> String -> List ( pkType, instanceType )
+handleInitialStream streamHandler data =
+    let
+        decoder =
+            modelPayloadDecoder streamHandler.instanceDecoder streamHandler.pkDecoder
+    in
+        case Json.Decode.decodeString (field "payload" (list decoder)) data of
+            Ok instances ->
+                List.map (\x -> ( x.pk, x.data )) instances
+
+            Err error ->
+                let
+                    _ =
+                        Debug.log "error" error
+                in
+                    []
+
+
+type alias ModelPayload instanceType pkType =
+    { model : String
+    , data : instanceType
+    , pk : pkType
+    }
+
+
+modelPayloadDecoder : Decoder a -> Decoder b -> Decoder (ModelPayload a b)
+modelPayloadDecoder dataDecoder pkDecoder =
+    (decode ModelPayload
+        |> requiredAt [ "model" ] string
+        |> requiredAt [ "data" ] dataDecoder
+        |> requiredAt [ "pk" ] pkDecoder
+    )
 
 
 
