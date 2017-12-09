@@ -1,5 +1,5 @@
 {
-    "version": "1.0.1",
+    "version": "2.0.0",
     "summary": "Utilities to ease the communication with Django Channels.",
     "repository": "https://github.com/valberg/elm-django-channels.git",
     "license": "GPL-3.0",
