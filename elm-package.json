@@ -7,7 +7,9 @@
         "src"
     ],
     "exposed-modules": [
-        "DjangoChannels"
+        "DjangoChannels",
+        "DjangoChannels.Initial",
+        "DjangoChannels.Binding"
     ],
     "dependencies": {
         "NoRedInk/elm-decode-pipeline": "3.0.0 <= v < 4.0.0",
