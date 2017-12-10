@@ -15,11 +15,6 @@ module DjangoChannels
 import Json.Decode exposing (Decoder, string, field, list)
 
 
--- External modules
-
-import Json.Decode.Pipeline exposing (decode, requiredAt)
-
-
 {-| Deal with streams from a WebsocketDemultiplexer.
 -}
 streamDemultiplexer : String -> (String -> streamType) -> streamType -> streamType

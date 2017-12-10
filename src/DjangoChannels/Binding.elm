@@ -5,6 +5,9 @@ module DjangoChannels.Binding
         , defaultCreate
         , defaultUpdate
         , defaultDelete
+        , createInstance
+        , updateInstance
+        , deleteInstance
         )
 
 {-|
@@ -18,23 +21,32 @@ module DjangoChannels.Binding
 # Default operations
 @docs defaultCreate, defaultUpdate, defaultDelete
 
+# Functions for sending data back to server
+@docs createInstance, updateInstance, deleteInstance
+
 -}
 
 -- Core modules
 
 import Json.Decode exposing (Decoder, string, field, list)
+import Json.Encode
 
 
 -- External modules
 
 import Json.Decode.Pipeline exposing (decode, requiredAt)
+import WebSocket
 
 
 {-| BindingStreamHandler defines how we should deal with a specific WebsocketBinding stream.
 -}
 type alias BindingStreamHandler pkType instanceType =
-    { instanceDecoder : Decoder instanceType
+    { websocketServer : String
+    , streamName : String
+    , instanceDecoder : Decoder instanceType
+    , instanceEncoder : instanceType -> Json.Encode.Value
     , pkDecoder : Decoder pkType
+    , pkEncoder : pkType -> Json.Encode.Value
     , createFunc : instanceType -> pkType -> List ( pkType, instanceType ) -> List ( pkType, instanceType )
     , updateFunc : instanceType -> pkType -> List ( pkType, instanceType ) -> List ( pkType, instanceType )
     , deleteFunc : pkType -> List ( pkType, instanceType ) -> List ( pkType, instanceType )
@@ -111,3 +123,95 @@ modelBindingDecoder dataDecoder pkDecoder =
         |> requiredAt [ "payload", "data" ] dataDecoder
         |> requiredAt [ "payload", "pk" ] pkDecoder
         |> requiredAt [ "payload", "action" ] string
+
+
+type ServerAction
+    = Create
+    | Update
+    | Delete
+
+
+actionToString : ServerAction -> String
+actionToString action =
+    case action of
+        Create ->
+            "create"
+
+        Update ->
+            "update"
+
+        Delete ->
+            "delete"
+
+
+{-| -}
+createInstance : BindingStreamHandler pkType instanceType -> instanceType -> Cmd msg
+createInstance streamHandler instance =
+    sendToServer
+        streamHandler
+        Create
+        Nothing
+        (Just instance)
+
+
+{-| -}
+updateInstance : BindingStreamHandler pkType instanceType -> pkType -> instanceType -> Cmd msg
+updateInstance streamHandler pk instance =
+    sendToServer
+        streamHandler
+        Update
+        (Just pk)
+        (Just instance)
+
+
+{-| -}
+deleteInstance : BindingStreamHandler pkType instanceType -> pkType -> Cmd msg
+deleteInstance streamHandler pk =
+    sendToServer
+        streamHandler
+        Delete
+        (Just pk)
+        Nothing
+
+
+sendToServer : BindingStreamHandler pkType instanceType -> ServerAction -> Maybe pkType -> Maybe instanceType -> Cmd msgType
+sendToServer streamHandler action maybePk maybeInstance =
+    let
+        dataField =
+            case maybeInstance of
+                Just instance ->
+                    [ ( "data", streamHandler.instanceEncoder instance ) ]
+
+                Nothing ->
+                    []
+
+        actionField =
+            [ ( "action", Json.Encode.string <| actionToString action ) ]
+
+        pkField =
+            case maybePk of
+                Just pk ->
+                    [ ( "pk", streamHandler.pkEncoder pk ) ]
+
+                Nothing ->
+                    []
+
+        payload =
+            case action of
+                Create ->
+                    actionField ++ dataField
+
+                Update ->
+                    pkField ++ actionField ++ dataField
+
+                Delete ->
+                    pkField ++ actionField
+    in
+        WebSocket.send streamHandler.websocketServer
+            (Json.Encode.encode 0
+                (Json.Encode.object
+                    [ ( "stream", Json.Encode.string streamHandler.streamName )
+                    , ( "payload", Json.Encode.object payload )
+                    ]
+                )
+            )
