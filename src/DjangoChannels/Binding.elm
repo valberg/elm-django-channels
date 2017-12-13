@@ -39,6 +39,42 @@ import WebSocket
 
 
 {-| BindingStreamHandler defines how we should deal with a specific WebsocketBinding stream.
+
+    import DjangoChannels.Binding as DCB
+
+    websocketServer = "ws://localhost:8000/"
+
+    type alias Todo =
+        { description : String
+        , isDone : Bool
+        }
+
+    todoDecoder : Decoder Todo
+    todoDecoder =
+        decode Todo
+            |> required "description" string
+            |> required "is_done" bool
+
+    todoEncoder : Todo -> Json.Encode.Value
+    todoEncoder instance =
+        Json.Encode.object
+            [ ( "description", Json.Encode.string instance.description )
+            , ( "is_done", Json.Encode.bool instance.isDone )
+            ]
+
+    todoStreamHandler : DCB.BindingStreamHandler String Todo
+    todoStreamHandler =
+        DCB.BindingStreamHandler
+            websocketServer
+            "todo"
+            todoDecoder
+            todoEncoder
+            string
+            Json.Encode.string
+            DCB.defaultCreate
+            DCB.defaultUpdate
+            DCB.defaultDelete
+
 -}
 type alias BindingStreamHandler pkType instanceType =
     { websocketServer : String
@@ -53,7 +89,31 @@ type alias BindingStreamHandler pkType instanceType =
     }
 
 
-{-| Handle data on a given BindingStreamHandler.
+{-| Handle data using a BindingStreamHandler.
+
+    import DjangoChannels.Binding as DCB
+
+    --
+
+    update : Msg -> Model -> ( Model, Cmd Msg )
+    update msg model =
+        case msg of
+            ...
+
+            HandleWebSocket data ->
+                case streamDemultiplexer data stringToStream NotFoundStream of
+                    TodoStream ->
+                        let
+                            todos =
+                                DCB.handleBindingStream todoStreamHandler data model.todos
+                        in
+                            ( { model | todos = todos }
+                            , Cmd.none
+                            )
+
+            ...
+
+
 -}
 handleBindingStream : BindingStreamHandler pkType instanceType -> String -> List ( pkType, instanceType ) -> List ( pkType, instanceType )
 handleBindingStream streamHandler data instances =
@@ -80,14 +140,14 @@ handleBindingStream streamHandler data instances =
                 instances
 
 
-{-| Default function for creating an instance.
+{-| Default function for creating an instance. Used as "createFunc" in a BindingStreamHandler to simply cons the pk-instance-pair onto the list of instances.
 -}
 defaultCreate : instanceType -> pkType -> List ( pkType, instanceType ) -> List ( pkType, instanceType )
 defaultCreate instance pk instances =
     ( pk, instance ) :: instances
 
 
-{-| Default function for updating an instance.
+{-| Default function for updating an instance. Used as "updateFunc" in a BindingStreamHandler to map over the list of instances and update the one matching the given pk.
 -}
 defaultUpdate : instanceType -> pkType -> List ( pkType, instanceType ) -> List ( pkType, instanceType )
 defaultUpdate instance pk instances =
@@ -101,7 +161,7 @@ defaultUpdate instance pk instances =
         instances
 
 
-{-| Default function for deleting an instance given a pk.
+{-| Default function for deleting an instance given a pk. Used as "deleteFunc in a BindingStreamHandler to filter out the instance with the given pk.
 -}
 defaultDelete : pkType -> List ( pkType, instanceType ) -> List ( pkType, instanceType )
 defaultDelete pk instances =
@@ -144,7 +204,8 @@ actionToString action =
             "delete"
 
 
-{-| -}
+{-| Sends the instance with the "create" action to the websocket server.
+-}
 createInstance : BindingStreamHandler pkType instanceType -> instanceType -> Cmd msg
 createInstance streamHandler instance =
     sendToServer
@@ -154,7 +215,8 @@ createInstance streamHandler instance =
         (Just instance)
 
 
-{-| -}
+{-| Sends the pk and instance with the "update" action to the websocket server.
+-}
 updateInstance : BindingStreamHandler pkType instanceType -> pkType -> instanceType -> Cmd msg
 updateInstance streamHandler pk instance =
     sendToServer
@@ -164,7 +226,8 @@ updateInstance streamHandler pk instance =
         (Just instance)
 
 
-{-| -}
+{-| Sends the pk with the "delete" action to the websocket server.
+-}
 deleteInstance : BindingStreamHandler pkType instanceType -> pkType -> Cmd msg
 deleteInstance streamHandler pk =
     sendToServer
